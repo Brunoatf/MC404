@@ -1,7 +1,8 @@
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdio.h>
+#include <stdio.h> //remover futuramente
 #define MAX_BYTES 110000
+#define ELF32_ST_VISIBILITY(o) ((o)&0x3)
 
 typedef struct
 {
@@ -41,7 +42,7 @@ typedef struct
     unsigned int st_value;
     unsigned int st_size;  
     unsigned char st_info; 
-    unsigned char st_other;
+    char st_other;
     unsigned short st_shndx; 
 } Elf32_Sym; //cada entrada da symbol table ocupa 16 bytes
 
@@ -134,8 +135,14 @@ int main(int argc, char *argv[]) {
         Elf32_Sym * symtab = (Elf32_Sym *) &elf[section_headers[symtab_index].sh_offset]; //ponteiro que aponta para a symbol table
         char * strtab = &elf[section_headers[strtab_index].sh_offset]; //ponteiro que aponta para a string table da symbol table
         char * symbol_name;
+        char binding[2];
         symtab_size = section_headers[symtab_index].sh_size / 16;
-        for (int i = 0; i < symtab_size; i++) {
+        for (int i = 1; i < symtab_size; i++) { //consideramos que a primeira linha da symtab é nula
+            write_hex_from_dec(symtab[i].st_value);
+            write(0, " ", 1);
+            binding[0] = symtab[i].st_info >> 4 ? 'g' : 'l';
+            binding[1] = '\0';
+            write(0, binding, 1);
             write(0, " ", 1);
             write_hex_from_dec(symtab[i].st_size);
             write(0, " ", 1);
@@ -143,8 +150,6 @@ int main(int argc, char *argv[]) {
             write(0, symbol_name, str_len(symbol_name));
             write(0, "\n", 1);
         }
-        
-        printf("%d", strtab_index);
 
     } else { //h
         unsigned int size;
