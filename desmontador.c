@@ -1,6 +1,5 @@
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdio.h> //remover futuramente
 #define MAX_BYTES 110000
 #define ELF32_ST_VISIBILITY(o) ((o)&0x3)
 
@@ -60,6 +59,7 @@ void write_dec(int num) {
     int i = 0, negativo = 0;
     if (num < 0) {
         negativo = 1;
+        num *= -1;
     }
     if (num == 0) {
         write(1, "0", 1);
@@ -229,77 +229,24 @@ void write_register(int registrador) {
     }
 }
 
-int swap_Endians(int value)
+void showbits(int n)
 {
- 
-    // This var holds the leftmost 8
-    // bits of the output.
-    int leftmost_byte;
- 
-    // This holds the left middle
-    // 8 bits of the output
-    int left_middle_byle;
- 
-    // This holds the right middle
-    // 8 bits of the output
-    int right_middle_byte;
- 
-    // This holds the rightmost
-    // 8 bits of the output
-    int rightmost_byte;
- 
-    // To store the result
-    // after conversion
-    int result;
- 
-    // Get the rightmost 8 bits of the number
-    // by anding it 0x000000FF. since the last
-    // 8 bits are all ones, the result will be the
-    // rightmost 8 bits of the number. this will
-    // be converted into the leftmost 8 bits for the
-    // output (swapping)
-    leftmost_byte = (value & 0x000000FF) >> 0;
- 
-    // Similarly, get the right middle and left
-    // middle 8 bits which will become
-    // the left_middle bits in the output
-    left_middle_byle = (value & 0x0000FF00) >> 8;
- 
-    right_middle_byte = (value & 0x00FF0000) >> 16;
- 
-    // Get the leftmost 8 bits which will be the
-    // rightmost 8 bits of the output
-    rightmost_byte = (value & 0xFF000000) >> 24;
- 
-    // Left shift the 8 bits by 24
-    // so that it is shifted to the
-    // leftmost end
-    leftmost_byte <<= 24;
- 
-    // Similarly, left shift by 16
-    // so that it is in the left_middle
-    // position. i.e, it starts at the
-    // 9th bit from the left and ends at the
-    // 16th bit from the left
-    left_middle_byle <<= 16;
- 
-    right_middle_byte <<= 8;
- 
-    // The rightmost bit stays as it is
-    // as it is in the correct position
-    rightmost_byte <<= 0;
- 
-    // Result is the concatenation of all these values.
-    result = (leftmost_byte | left_middle_byle |
-              right_middle_byte | rightmost_byte);
- 
-    return result;
+    int i,k,andmask;
+
+    for(i=31;i>=0;i--)
+    {
+        andmask = 1 << i;
+        k = n & andmask;
+
+        k == 0 ? printf("0") : printf("1");
+    }
+    printf("\n");
 }
 
-void write_instruction(int instruction) {
+void write_instruction(int instruction, Elf32_Sym * symtab, int symtab_size, char * strtab, int adress) {
     char bin[33], first_7[8], digits_12_to_14[4];
     for (int i = 0; i < 32; i++) {
-        bin[i] = '0' + ((instruction >> i) & 1); 
+        bin[i] = '0' + ((instruction >> i) & 1);
     }
     bin[32] = '\0';
     int rd = 0, rs1 = 0, rs2 = 0;
@@ -316,30 +263,76 @@ void write_instruction(int instruction) {
         rs1 += pow2(i) * (bin[15+i] - '0');
         rs2 += pow2(i) * (bin[20+i] - '0');
     }
-    int im3; //im3 representa os imediatos compostos pelos últimos 12 bits de bin
-    im3 = ((instruction >> 20) & 0b111111111111);
-    printf("%s\n", bin);
+    int im3 = instruction >> 20;
+    int im1 = instruction >> 12;
+
+    //im2 representa o segundo tipo de imediato da tabela
+    int im2_12_19 = ((instruction >> 12) & 0xff) << 11; //bits 12 ate 19
+    int im2_11 = ((instruction >> 20) & 0b1) << 10; //bit 11
+    int im2_1_10 = ((instruction >> 21) & 0b1111111111); //bits 1 ate 10
+    int im2_20 = ((instruction >> 31) & 0b1) << 19; //bit 20
+    int im2 = im2_11 | im2_12_19 | im2_1_10 | im2_20;
+    if (im2 >> 11 & 0b1) { //se for negativo:
+        im2 = (~im2 & 0xfff) + 0b1;
+        im2 = adress - im2;
+    } else {
+        im2 += adress;
+    }
+
+    //im4 representa o quarto tipo de imediato da tabela
+    int im4_11 = ((instruction >> 7) & 0b1) << 10; //bit 11
+    int im4_1_4 = ((instruction >> 8) & 0xf); //bits 1 ate 4 -> o  ultimo shift coloca o bit 0 como 0
+    int im4_12 = ((instruction >> 31) & 0b1) << 11; //bit 12
+    int im4_5_10 = ((instruction >> 25) & 0b111111) << 4; //bits 5 ate 10
+    int im4 = im4_11 | im4_12 | im4_1_4 | im4_5_10; 
+    if (im4 >> 11 & 0b1) { //se for negativo:
+        im4 = (~im4 & 0xfff) + 0b1;
+        im4 = adress - im4;
+    } else {
+        im4 += adress;
+    }
+
+    //im5 representa o quinto tipo de imediato da tabela
+    int im5_1 = (instruction >> 7) & 0b11111 ;
+    int im5_2 = ((instruction >> 25) << 5);
+    int im5 = im5_1 | im5_2;
     if (str_compare(first_7, "0110111")) {
         write(1, "lui", 3);
         write(1, " ", 1);
         write_register(rd);
         write(1, ", ", 2);
+        write_dec(im1);
     } else if (str_compare(first_7, "0010111")) {
         write(1, "auipc", 5);
         write(1, " ", 1);
         write_register(rd);
         write(1, ", ", 2);
+        write_dec(im1);
     } else if (str_compare(first_7, "1101111")) {
         write(1, "jal", 3);
         write(1, " ", 1);
         write_register(rd);
-        write(1, ", ", 2);
+        write(1, ", 0x", 4);
+        write_hex_from_dec(im2, 1);
+        write(1, " <", 2);
+        char * symbol_name;
+        for (int j = 0; j < symtab_size; j++) {
+            if (im2 == symtab[j].st_value) {
+                symbol_name = &strtab[symtab[j].st_name];   
+                write(1, symbol_name, str_len(symbol_name));
+                break;
+            }
+        }  
+        write(1, ">", 1);
     } else if (str_compare(first_7, "1100111")) {
         write(1, "jalr", 4);
         write(1, " ", 1);
         write_register(rd);
         write(1, ", ", 2);
+        write_dec(im3);
+        write(1, "(", 1);
         write_register(rs1);
+        write(1, ")", 1);
     } else if (str_compare(first_7, "1100011")) {
         if (str_compare(digits_12_to_14, "000")) {
             write(1, "beq", 3);
@@ -354,7 +347,17 @@ void write_instruction(int instruction) {
         } else {
             write(1, "bgeu", 4);
         }
+        write(1, " ", 1);
         write_register(rs1);
+        write(1, ", ", 2);
+        write_register(rs2);
+        write(1, ", ", 2);
+        if (str_compare(digits_12_to_14, "000") || str_compare(digits_12_to_14, "100")) {
+            write(1, "0x", 2);
+            write_hex_from_dec(im4, 1);
+        } else {
+            write_dec(im4);
+        }
     } else if (str_compare(first_7, "0000011")) {
         if (str_compare(digits_12_to_14, "000")) {
             write(1, "lb", 2);
@@ -362,7 +365,7 @@ void write_instruction(int instruction) {
             write(1, "lh", 2);
         } else if (str_compare(digits_12_to_14, "010")) {
             write(1, "lw", 2);
-        } else if (str_compare(digits_12_to_14, "100")) {
+        } else if (str_compare(digits_12_to_14, "001")) {
             write(1, "lbu", 3);
         } else {
             write(1, "lhu", 3);
@@ -370,9 +373,10 @@ void write_instruction(int instruction) {
         write(1, " ", 1);
         write_register(rd);
         write(1, ", ", 2);
-        write_register(rs1);
-        write(1, ", ", 2);
         write_dec(im3);
+        write(1, "(", 1);
+        write_register(rs1);
+        write(1, ")", 1);
     } else if (str_compare(first_7, "0100011")) {
         if (str_compare(digits_12_to_14, "000")) {
             write(1, "sb", 2);
@@ -381,7 +385,13 @@ void write_instruction(int instruction) {
         } else {
             write(1, "sw", 2);
         }
+        write(1, " ", 1);
+        write_register(rs2);
+        write(1, ", ", 2);
+        write_dec(im5);
+        write(1, "(", 1);
         write_register(rs1);
+        write(1, ")", 1);
     } else if (str_compare(first_7, "0010011")) {
         if (str_compare(digits_12_to_14, "000")) {
             write(1, "addi", 4);
@@ -408,6 +418,14 @@ void write_instruction(int instruction) {
         write_register(rd);
         write(1, ", ", 2);
         write_register(rs1);
+        write(1, ", ", 2);
+        if (!str_compare(digits_12_to_14, "101") && !str_compare(digits_12_to_14, "100")) {
+            write_dec(im3);
+        }
+        else {
+            int shamt = (instruction >> 20) & 0b11111;
+            write_dec(shamt);
+        }
     } else if (str_compare(first_7, "0110011")) {
         if (str_compare(digits_12_to_14, "000")) {
             if (bin[30] == '0') {
@@ -438,6 +456,8 @@ void write_instruction(int instruction) {
         write_register(rd);
         write(1, ", ", 2);
         write_register(rs1);
+        write(1, ", ", 2);
+        write_register(rs2);
     } else if (str_compare(first_7, "0001111")) {
         if (str_compare(digits_12_to_14, "000")) {
             write(1, "fence", 5);
@@ -445,6 +465,8 @@ void write_instruction(int instruction) {
             write(1, "fence.i", 7);
         }
     } else if (str_compare(first_7, "1110011")) {
+        int csr = instruction >> 20;
+        int zimm = (instruction >> 15) & 0b11111;
         if (str_compare(digits_12_to_14, "000")) {
             if (bin[20] == '0') {
                 write(1, "ecall", 5);
@@ -467,9 +489,15 @@ void write_instruction(int instruction) {
         }
         write(1, " ", 1);
         write_register(rd);
+        write(1, ", ", 2);
         if (str_compare(digits_12_to_14, "100") || str_compare(digits_12_to_14, "010") || str_compare(digits_12_to_14, "110")) {
+            write_dec(csr);
             write(1, ", ", 2);
             write_register(rs1);
+        } else {
+            write_dec(csr);
+            write(1, ", ", 2);
+            write_dec(zimm);
         }
     } else {
         write(1, "<unknown>", 9);
@@ -546,7 +574,7 @@ int main(int argc, char *argv[]) {
                 write_hex_from_dec(hex_number, 2);
                 write(1, " ", 1);
             }
-            write_instruction(*instruction);
+            write_instruction(*instruction, symtab, symtab_size, strtab, adress);
             write(1, "\n", 1);
         }
 
