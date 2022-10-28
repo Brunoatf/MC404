@@ -1,7 +1,16 @@
-.data 
+.rodata 
 
 quebra_linha: .asciz "\n"
-teste: .asciz "teste"
+
+.data
+
+teste: .asciz "    256 a"
+tempo1: .asciz "tempo1"
+tempo2: .asciz "tempo2"
+
+.bss
+
+string: .skip 0xa0
 
 .text
 
@@ -11,7 +20,6 @@ puts:
     li t0, 0
     li a2, 0 #a2 guarda o tamanho da string de a0
     mv t1, a0 #t1 guarda o endereço do próximo char
-    breakpoint1:
     1:
         lb t2, 0(t1)
         addi t1, t1, 1
@@ -23,7 +31,7 @@ puts:
     mv a1, a0 #buffer 
     li a0, 1            # file descriptor = 1 (stdout)
     li a7, 64           # syscall write (64)
-    ecall
+    ecall   
 
     li a0, 1
     li a7, 64
@@ -41,10 +49,10 @@ gets:
 
     mv a6, a0
     mv a1, a0 #a1 guarda o endereço de salvamento pro byte
-    li a2, 1 #leremos 1 byte por vez
-    li a0, 0 #stdin
-    li a7, 63 # syscall read (63)
     1:
+        li a2, 1 #leremos 1 byte por vez
+        li a0, 0 #stdin
+        li a7, 63 # syscall read (63)
         ecall
         lbu a3, 0(a1)
         beq a3, t1, addlastchar #se a3 for '\n', encerramos o while e escrevemos \0 ao final da string
@@ -91,8 +99,6 @@ atoi:
         j 1b
     2:
 
-    mv a0, a3
-
 ret
 
 #char *  itoa ( int value, char * str, int base );
@@ -100,8 +106,9 @@ itoa:
     mv a7, a1
     li t0, 16
     li t1, 10
-    beq a2, t0, 2
-    1: #base decimal:
+    beq a2, t0, hex
+
+        #base decimal:
         bge a0, zero, positivo
         li t2, '-'
         sb t2, 0(a1)
@@ -123,8 +130,8 @@ itoa:
         1:  
             rem t4, a0, t1 #t4 passa a receber o resto da divisão de a0 por 10
             addi t4, t4, '0'
-            div a0, a0, t1 #
-            sb t4, 0(t3) #guardamos no endereço de t3 o dígito t4
+            div a0, a0, t1 #divide-se a0 por 10 
+            sb t4, 0(t3) #guardamos no endereço de t3 o dígito ascii t4
             beq t3, a1, 2f
             addi t3, t3, -1
             j 1b
@@ -132,7 +139,7 @@ itoa:
         
         j 3f
 
-    2: #base hexadecimal:
+    hex: #base hexadecimal:
 
         li t2, 0 #representa o número de dígitos de value
         mv t3, a0
@@ -148,12 +155,12 @@ itoa:
 
         1:  
             rem t4, a0, t0 #t4 passa a receber o resto da divisão de a0 por 16
-            bge t4, t1, 1f #se t4 for maior ou igual a 10
+            bge t4, t1, 3f #se t4 for maior ou igual a 10
             addi t4, t4, '0'
-            j 2f
-            1:
+            j 4f
+            3:
             addi t4, t4, 'a'-10
-            2:
+            4:
             div a0, a0, t0
             sb t4, 0(t3) #guardamos no endereço de t3 o dígito t4
             beq t3, a1, 2f
@@ -161,13 +168,60 @@ itoa:
             j 1b
         2:
 
-        j 3f
-
     3:
     mv a0, a7
 ret
 
+#int time()
+time:
+    addi sp, sp, -16
+    mv a0, sp #buffer_timeval
+    mv a1, zero #buffer time zone
+    li a7, 169 # chamada de sistema gettimeofday
+    ecall
+    lw t1, 0(sp) # tempo em segundos
+    lw t2, 8(sp) # fração do tempo em microssegundos
+    li t3, 1000
+    mul t1, t1, t3
+    div t2, t2, t3
+    add a0, t2, t1
+    addi sp, sp, 16
+ret
+
+#void sleep(int ms)
+sleep:
+    addi sp, sp, -16
+    sw a0, 0(sp) #0(sp) guarda a duração desejada em ms
+    sw ra, 12(sp)
+    jal time
+    li t0, -1
+    mul a0, a0, t0
+    sw a0, 4(sp) #4(sp) guarda o valor negativo do tempo inicial
+    break1:
+    1:
+        jal time
+        lw t0, 4(sp)
+        lw t1, 0(sp) #t1 guarda a duração desejada
+        break2:
+        add a0, a0, t0 #a0 passa a guardar o tempo decorrido
+        bgeu a0, t1, 2f
+        j 1b 
+    2:
+    lw ra, 12(sp)
+    addi sp, sp, 16
+ret
+
+#int approx_sqrt(int x, int iterations)
+approx_sqrt:
+
+#void imageFilter(char * img, int width, int height, char filter[3][3]);
+imageFilter:
+
+#void exit(int code)
+exit:
+    li a7, 1
+    ecall
+ret
+
 .globl _start
 _start:
-la a0, teste
-jal puts
