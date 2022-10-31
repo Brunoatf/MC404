@@ -1,7 +1,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #define MAX_BYTES 110000
-#define ELF32_ST_VISIBILITY(o) ((o)&0x3)
 
 typedef struct
 {
@@ -101,6 +100,10 @@ void write_hex_from_dec(int decimal, int mode) { //mode = 0: hex com 8 dígitos.
         while (num_digits < 2) {
             hex_invertido[num_digits++] = '0';
         }
+    }
+    if (mode == 1 && num_digits == 0) {
+        hex_invertido[0] = '0';
+        num_digits++;
     }
     for (int j=0; j<num_digits; j++) {
         hex[j] = hex_invertido[num_digits - 1 - j];
@@ -253,12 +256,12 @@ void write_instruction(int instruction, Elf32_Sym * symtab, int symtab_size, cha
     int im1 = instruction >> 12;
 
     //im2 representa o segundo tipo de imediato da tabela
-    int im2_12_19 = ((instruction >> 12) & 0xff) << 11; //bits 12 ate 19
-    int im2_11 = ((instruction >> 20) & 0b1) << 10; //bit 11
-    int im2_1_10 = ((instruction >> 21) & 0b1111111111); //bits 1 ate 10
-    int im2_20 = ((instruction >> 31) & 0b1) << 19; //bit 20
+    int im2_12_19 = ((instruction >> 12) & 0xff) << 12; //bits 12 ate 19
+    int im2_11 = ((instruction >> 20) & 0b1) << 11; //bit 11
+    int im2_1_10 = ((instruction >> 21) & 0b1111111111) << 1; //bits 1 ate 10
+    int im2_20 = ((instruction >> 31) & 0b1) << 20; //bit 20
     int im2 = im2_11 | im2_12_19 | im2_1_10 | im2_20;
-    if (im2 >> 11 & 0b1) { //se for negativo:
+    if (im2 >> 12 & 0b1) { //se for negativo:
         im2 = (~im2 & 0xfff) + 0b1;
         im2 = adress - im2;
     } else {
@@ -266,12 +269,12 @@ void write_instruction(int instruction, Elf32_Sym * symtab, int symtab_size, cha
     }
 
     //im4 representa o quarto tipo de imediato da tabela
-    int im4_11 = ((instruction >> 7) & 0b1) << 10; //bit 11
-    int im4_1_4 = ((instruction >> 8) & 0xf); //bits 1 ate 4 -> o  ultimo shift coloca o bit 0 como 0
-    int im4_12 = ((instruction >> 31) & 0b1) << 11; //bit 12
-    int im4_5_10 = ((instruction >> 25) & 0b111111) << 4; //bits 5 ate 10
+    int im4_11 = ((instruction >> 7) & 0b1) << 11; //bit 11
+    int im4_1_4 = ((instruction >> 8) & 0xf) << 1; //bits 1 ate 4 -> o  ultimo shift coloca o bit 0 como 0
+    int im4_12 = ((instruction >> 31) & 0b1) << 12; //bit 12
+    int im4_5_10 = ((instruction >> 25) & 0b111111) << 5; //bits 5 ate 10
     int im4 = im4_11 | im4_12 | im4_1_4 | im4_5_10; 
-    if (im4 >> 11 & 0b1) { //se for negativo:
+    if (im4 >> 12 & 0b1) { //se for negativo:
         im4 = (~im4 & 0xfff) + 0b1;
         im4 = adress - im4;
     } else {
@@ -282,6 +285,7 @@ void write_instruction(int instruction, Elf32_Sym * symtab, int symtab_size, cha
     int im5_1 = (instruction >> 7) & 0b11111 ;
     int im5_2 = ((instruction >> 25) << 5);
     int im5 = im5_1 | im5_2;
+
     if (str_compare(first_7, "0110111")) {
         write(1, "lui", 3);
         write(1, " ", 1);
@@ -446,7 +450,35 @@ void write_instruction(int instruction, Elf32_Sym * symtab, int symtab_size, cha
         write_register(rs2);
     } else if (str_compare(first_7, "0001111")) {
         if (str_compare(digits_12_to_14, "000")) {
+            int succ = (instruction >> 20) & 0b1111;
+            int pred = (instruction >> 24) & 0b1111; //iorw
             write(1, "fence", 5);
+            write(1, " ", 1);
+            if ((pred >> 3) & 0b1) {
+                write(1, "i", 1);
+            }
+            if ((pred >> 2) & 0b1) {
+                write(1, "o", 1);
+            }
+            if ((pred >> 1) & 0b1) {
+                write(1, "r", 1);
+            }
+            if (pred & 0b1) {
+                write(1, "w", 1);
+            }
+            write(1, ", ", 2);
+            if ((succ >> 3) & 0b1) {
+                write(1, "i", 1);
+            }
+            if ((succ >> 2) & 0b1) {
+                write(1, "o", 1);
+            }
+            if ((succ >> 1) & 0b1) {
+                write(1, "r", 1);
+            }
+            if (succ & 0b1) {
+                write(1, "w", 1);
+            }
         } else {
             write(1, "fence.i", 7);
         }
@@ -542,7 +574,8 @@ int main(int argc, char *argv[]) {
             instruction = (unsigned int *) &elf[section_headers[text_index].sh_offset + i];
             for (int j = 0; j < symtab_size; j++) {
                 if (adress == symtab[j].st_value) {
-                    symbol_name = &strtab[symtab[j].st_name];   
+                    symbol_name = &strtab[symtab[j].st_name]; 
+                    write(1, strtab, str_len(strtab));
                     write(1, "\n", 1);
                     write_hex_from_dec(adress, 0);
                     write(1, " <", 2);
