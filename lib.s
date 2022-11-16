@@ -1,388 +1,164 @@
+.bss
+
+.align 4
+isr_stack: .skip 1024
+isr_stack_end:
+
+.data
+
+.globl _system_time
+
+_system_time: .word 0
+
 .text
 
-#recebe endereço de string no a0
-.globl puts
-puts:
+.set base_gpt, 0xFFFF0100
+.set base_midi, 0xFFFF0300
 
-    addi sp, sp, -16
-    li t0, '\n'
-    sb t0, 0(sp)
-
-    li t0, 0
-    li a2, 0 #a2 guarda o tamanho da string de a0
-    mv t1, a0 #t1 guarda o endereço do próximo char
-    1:
-        lb t2, 0(t1)
-        addi t1, t1, 1
-        beq t2, t0, 2f
-        addi a2, a2, 1  
-        j 1b
-    2:
-
-    mv a1, a0 #buffer 
-    li a0, 1            # file descriptor = 1 (stdout)
-    li a7, 64           # syscall write (64)
-    ecall   
-
-    li a0, 1
-    li a7, 64
-    li a2, 1
-    mv a1, sp
-    ecall
-
-    addi sp, sp, 16
+.globl play_note
+#void play_note(int ch, int inst, int note, int vel, int dur);
+play_note:
+    li t0, base_midi
+    sb a0, 0(t0)
+    sh a1, 2(t0)
+    sb a2, 4(t0)
+    sb a3, 5(t0)
+    sb a4, 6(t0)
 ret
 
-#recebe uma string de stdin e guarda no endereço de a0
-.globl gets
-gets:
+#Deixei vazias as rotinas para int. internas e exceções. No futuro, eu poderia preenchê-las caso precisasse tratar coisas diferentes de int. externas
 
-    li t0, 0
-    li t1, '\n'
-    li t2, 26
-
-    mv a6, a0
-    mv a1, a0 #a1 guarda o endereço de salvamento pro byte
-    1:
-        li a2, 1 #leremos 1 byte por vez
-        li a0, 0 #stdin
-        li a7, 63 # syscall read (63)
-        ecall
-        lbu a3, 0(a1)
-        beq a3, t1, addlastchar #se a3 for '\n', encerramos o while e escrevemos \0 ao final da string
-        beq a3, t2, addlastchar #se a3 for um final de arquivo, encerramos o while e escrevemos \0 ao final da string
-        addi a1, a1, 1
-        j 1b
-        addlastchar:
-        sb t0, 0(a1)
-    2:
-    
-    mv a0, a6
-
+isr_interrupcao_interna:
 ret
 
-#primeiro descarta caracteres em branco e transforma a string apontada por a0 em int
-.globl atoi
-atoi:
-
-    li t0, ' '
-    li a2, 0 #offset de espaços em branco até o número desejado
-    mv t1, a0
-    1:
-        lbu t2, 0(t1)
-        bne t2, t0, 2f
-        addi a2, a2, 1
-        addi t1, t1, 1
-        j 1b
-    2:
-
-    add a1, a0, a2 #a1 passa a apontar possivelmente para o sinal do número desejado
-    li t0, '+'
-    lbu a3, 0(a1)
-    beq a3, t0, 1f //se o numero for positivo com caractere de sinal, vai para 1f
-    li t0, '-'
-    beq a3, t0, 2f //se for negativo, vai para 2f
-    li a7, 1
-    j 3f
-    1:
-        li a7, 1
-        addi a1, a1, 1
-    2:
-        li a7, -1
-        addi a1, a1, 1
-    3:
-
-    li a0, 0
-    li t0, 10
-    li t1, '0'
-    li t2, '9'
-    1:
-        lbu a3, 0(a1)
-        addi a1, a1, 1
-        blt a3, t1, 2f
-        bgt a3, t2, 2f
-        mul a0, a0, t0
-        addi a3, a3, -'0'
-        add a0, a0, a3
-        j 1b
-    2:
-
-    mul a0, a0, a7
-
+isr_excecao:
 ret
 
-#char *  itoa ( int value, char * str, int base );
-.globl itoa
-itoa:
-    mv a7, a1
+isr_interrupcao_externa:
+    #Faz com que o GPT gere uma interrupção em 100 ms
+    li t0, 100
+    li t1, base_gpt
+    sw t0, 8(t1)
 
-    bge a0, zero, positivo
-    li t2, '-'
-    sb t2, 0(a1)
-    addi a1, a1, 1
-    positivo:
-    
-    li t2, 0 #representa o número de dígitos de value
-    
-    mv t3, a0
-    1:
-        addi t2, t2, 1
-        div t3, t3, a2
-    bne t3, zero, 1b
-    
-    li t4, 0  
-    add t3, t2, a1 #t3 passa a guardar o endereço do \0 após o número, que possui t2 dígitos
-    sb t4, 0(t3) #seta o último dígito da string como \0
-    addi t3, t3, -1 #t3 será decrementado ao longo da montagem do número, até ser igual a a1
-    li t6, 9
-    1:  
-        rem t4, a0, a2 #t4 passa a receber o resto da divisão de a0 por a2
-        ble t4, t6, 3f
-            addi t4, t4, 'a'-10
-            j 4f
-        3:
-            addi t4, t4, '0'
-        4:
-        div a0, a0, a2 #divide-se a0 por a2
-        sb t4, 0(t3) #guardamos no endereço de t3 o dígito ascii t4
-        beq t3, a1, 2f
-        addi t3, t3, -1
-        j 1b
-    2:
-
-    mv a0, a7
+    #Incrementa o system time em 100 unidades
+    la t0, _system_time
+    lw t1, 0(t0)
+    addi t1, t1, 100
+    sw t1, 0(t0)
 ret
 
-#int time()
-.globl time
-time:
-    addi sp, sp, -16
-    mv a0, sp #buffer_timeval
-    mv a1, zero #buffer time zone
-    li a7, 169 # chamada de sistema gettimeofday
-    ecall
-    mv a0, sp
-    lw t1, 0(sp) # tempo em segundos
-    lw t2, 8(sp) # fração do tempo em microssegundos
-    li t3, 1000
-    mul t1, t1, t3
-    div t2, t2, t3
-    add a0, t2, t1
-    addi sp, sp, 16
-ret
+.globl main_isr
+main_isr:
 
-#void sleep(int ms)
-.globl sleep
-sleep:
-    addi sp, sp, -16
-    sw a0, 0(sp) #0(sp) guarda a duração desejada em ms
-    sw ra, 12(sp)
-    jal time
-    li t0, -1
-    mul a0, a0, t0
-    sw a0, 4(sp) #4(sp) guarda o valor negativo do tempo inicial
-    break1:
-    1:
-        jal time
-        lw t0, 4(sp)
-        lw t1, 0(sp) #t1 guarda a duração desejada
-        break2:
-        add a0, a0, t0 #a0 passa a guardar o tempo decorrido
-        bgeu a0, t1, 2f
-        j 1b 
-    2:
-    lw ra, 12(sp)
-    addi sp, sp, 16
-ret
+    #Salva-se o contexto do programa no momento da interrupção:
+    csrrw sp, mscratch, sp
+    addi sp, sp, -124
+    sw x1, 0(sp)
+    sw x2, 4(sp)
+    sw x3, 8(sp)
+    sw x4, 12(sp)
+    sw x5, 16(sp)
+    sw x6, 20(sp)
+    sw x7, 24(sp)
+    sw x8, 28(sp)
+    sw x9, 32(sp)
+    sw x10, 36(sp)
+    sw x11, 40(sp)
+    sw x12, 44(sp)
+    sw x13, 48(sp)
+    sw x14, 52(sp)
+    sw x15, 56(sp)
+    sw x16, 60(sp)
+    sw x17, 64(sp)
+    sw x18, 68(sp)
+    sw x19, 72(sp)
+    sw x20, 76(sp)
+    sw x21, 80(sp)
+    sw x22, 84(sp)
+    sw x23, 88(sp)
+    sw x24, 92(sp)
+    sw x25, 96(sp)
+    sw x26, 100(sp)
+    sw x27, 104(sp)
+    sw x28, 108(sp)
+    sw x29, 112(sp)
+    sw x30, 116(sp)
+    sw x31, 120(sp)
 
-#int approx_sqrt(int x, int iterations); a1 é número
-.globl approx_sqrt
-approx_sqrt:
+    # Trata a interrupção
+    csrr a1, mcause # lê a causa da interrupção
+    bgez a1, isr_excecao # Verifica se é exceção ou interrupção
 
-    li a7, 0 //variavel de contagem da iteracao
-    li a2, 2
-    div a3, a0, a2 //a3 recebe k e guardará o resultado final
-    1:
-        mv a6, a3 # a6 = k
-        div a3, a0, a6 //a3 = y/k
-        add a3, a3, a6 //a3 = k + y/k
-        div a3, a3, a2 #a3 = k'
-        #mv a6, a3 #a6 = k'
-        addi a7, a7, 1
-    blt a7, a1, 1b
+    andi a1, a1, 0x3f # Isola a causa de interrupção
+    li a2, 11 # a2 = interrupção externa
+    bne a1, a2, isr_interrupcao_interna # desvia se não for interrupção externa
 
-    mv a0, a3
+    #Agora trataremos a interrupção externa:
 
-ret
+    jal isr_interrupcao_externa
 
-#void imageFilter(char * img, int width, int height, char filter[3][3]);
-.globl imageFilter
-imageFilter:
+    #Restaura o contexto:
+    lw x1, 0(sp)
+    lw x2, 4(sp)
+    lw x3, 8(sp)
+    lw x4, 12(sp)
+    lw x5, 16(sp)
+    lw x6, 20(sp)
+    lw x7, 24(sp)
+    lw x8, 28(sp)
+    lw x9, 32(sp)
+    lw x10, 36(sp)
+    lw x11, 40(sp)
+    lw x12, 44(sp)
+    lw x13, 48(sp)
+    lw x14, 52(sp)
+    lw x15, 56(sp)
+    lw x16, 60(sp)
+    lw x17, 64(sp)
+    lw x18, 68(sp)
+    lw x19, 72(sp)
+    lw x20, 76(sp)
+    lw x21, 80(sp)
+    lw x22, 84(sp)
+    lw x23, 88(sp)
+    lw x24, 92(sp)
+    lw x25, 96(sp)
+    lw x26, 100(sp)
+    lw x27, 104(sp)
+    lw x28, 108(sp)
+    lw x29, 112(sp)
+    lw x30, 116(sp)
+    lw x31, 120(sp)
+    addi sp, sp, 124
+    csrrw sp, mscratch, sp
 
-    addi sp, sp, -48
-    sw s0, 0(sp)
-    sw s1, 4(sp)
-    sw s2, 8(sp)
-    sw s3, 12(sp)
-    sw s4, 16(sp)
-    sw s5, 20(sp)
-    sw s6, 24(sp)
-    sw s7, 28(sp)
-    sw s8, 32(sp)
+mret
 
-    mul t6, a1, a2 //t0 guarda o numero de posicoes da matriz
-    li t1, 4
-    mul t6, t6, t1
-    li t1, 16
-    rem t2, t6, t1
-    sub t2, t1, t2 //t2 passa a receber 16-(t0 % 16)
-    add t6, t6, t2 //agora t6 é multiplo de 16
-    
-    sub sp, sp, t6
-    mv t4, sp //t4 guardará o endereço do próximo elemento da matriz a ser guardado na pilha
-    
-    li t0, ' '
-    li t1, '\n'
-    li t2, 10
+.globl _start
+_start:
 
-    mv s0, a0 #s0 passa a ter o endereço das informações, pois a0 será usado em syscalls
-    mv a0, a1 #na syscall a0 deve ter a largura
-    mv a1, a2 #e a1 a altura
+#Estabelece qual é a ISR a ser usada
+la t0, main_isr
+csrw mtvec, t0
 
-    mv s3, a0 #largura
-    mv s4, a1 #altura
+#Faz mscratch apontar para a base da pilha da ISR
+la t0, isr_stack_end
+csrw mscratch, t0
 
-    li s1, 0 #i do for
-    li s2, 0 #j do for
-    addi t0, s3, -1 #indice da ultima coluna
-    addi t1, s4, -1 #indice da ultima linha
-    1: #for que percorre as linhas da matriz
-        bge s1, s4, 2f #sai do for se s1 for igual a height
-        li s2, 0
-        3: #for que percorre as colunas da matriz
-            bge s2, s3, 4f #sai do for se s2 for igual a width
+#Habilita interrupções externas
+csrr t1, mie
+li t2, 0x800
+or t1, t1, t2
+csrw mie, t1
 
-            #se estamos na primeira coluna, na última coluna, na primeira linha ou na última linha
-            beq s1, zero, 5f
-            beq s1, t1, 5f
-            beq s2, zero, 5f
-            beq s2, t0, 5f
+# Habilita interrupções globais
+csrr t1, mstatus
+ori t1, t1, 0x8
+csrw mstatus, t1
 
-            li s5, 0 #guardará o resultado final
-            sub t3, s0, s3 #t3 será a posicao i-1 j da matriz da imagem
+#Faz com que o GPT gere uma interrupção em 100 ms
+li t0, 100
+li t1, base_gpt
+sw t0, 8(t1)
 
-            lw s7, 0(a3) #s7 será a posição 1x1 da matriz de filtro
-            lbu s6, -1(t3) #s6 guarda o pixel M[i-1][j-1]
-            mul s6, s6, s7 #multilplica o pixel de s6 por s7
-            add s5, s5, s6
-            
-            lw s7, 1(a3) #s7 será a posição 1x2 da matriz de filtro
-            lbu s6, 0(t3) #s6 guarda o pixel M[i-1][j]
-            mul s6, s6, s7 #multiplica o pixel de s6 por s7
-            add s5, s5, s6
-
-            lw s7, 2(a3) #s7 será a posição 1x3 da matriz de filtro
-            lbu s6, 1(t3) #s6 guarda o pixel M[i-1][j+1]
-            mul s6, s6, s7 #multiplica o pixel de s6 por s7
-            add s5, s5, s6
-
-            lw s7, 3(a3) #s7 será a posição 2x1 da matriz de filtro
-            lbu s6, -1(s0) #s6 guarda o pixel M[i][j-1]
-            mul s6, s6, s7 #multiplica o pixel de s6 por s7
-            add s5, s5, s6
-            
-            lw s7, 4(a3) #s7 será a posição 2x2 da matriz de filtro
-            lbu s6, 0(s0) #s6 guarda o pixel M[i][j]
-            mul s6, s6, s7 #multiplica o pixel de s6 por s7
-            add s5, s5, s6
-
-            lw s7, 5(a3) #s7 será a posição 2x3 da matriz de filtro
-            lbu s6, 1(s0) #s6 guarda o pixel M[i][j+1]
-            mul s6, s6, s7 #multiplica o pixel de s6 por -1
-            add s5, s5, s6
-
-            add t3, s0, s3
-
-            lw s7, 5(a3) #s7 será a posição 3x1 da matriz de filtro
-            lbu s6, -1(t3) #s6 guarda o pixel M[i+1][j-1]
-            mul s6, s6, s7 #multiplica o pixel de s6 por -1
-            add s5, s5, s6
-
-            lw s7, 6(a3) #s7 será a posição 3x2 da matriz de filtro
-            lbu s6, 0(t3) #s6 guarda o pixel M[i+1][j]
-            mul s6, s6, s7 #multiplica o pixel de s6 por -1
-            add s5, s5, s6
-
-            lw s7, 7(a3) #s7 será a posição 3x3 da matriz de filtro
-            lbu s6, 1(t3) #s6 guarda o pixel M[i+1][j+1]
-            mul s6, s6, s7 #multiplica o pixel de s6 por -1
-            add s5, s5, s6
-
-            li s8, 255
-    
-            blt s5, zero, 1f
-            bge s5, s8, 2f
-            j store_in_stack
-
-            1: //s5 é menor que 0
-            li s5, 0
-            j store_in_stack
-
-            2: //s5 é maior que 255
-            li s5, 255
-            j store_in_stack
-
-            5: 
-            li s5, 0 #estamos em uma posição de borda que deve ser pintada de preto
-            
-            store_in_stack: #rotulo apontando para o final desse for, onde guardaremos o valor na stack
-
-            sw s5, 0(t4)
-            addi t4, t4, 4
-
-            addi s2, s2, 1
-            j 3b
-        4:
-        addi s1, s1, 1
-        j 1b
-    2:
-
-
-    mv t4, sp //t4 passa a apontar para o primeiro elemento da matriz na stack
-    li s1, 0 #i do for
-    li s2, 0 #j do for
-    1: #for que percorre as linhas da matriz
-        bge s1, s4, 2f #sai do for se s1 for igual a height
-        li s2, 0
-        3: #for que percorre as colunas da matriz
-            bge s2, s3, 4f #sai do for se s2 for igual a width
-
-            lw s5, 0(t4)
-            addi t4, t4, 4
-            sw s5, 0(s0)
-            addi s0, s0, 4 
-
-            addi s2, s2, 1
-            j 3b
-        4:
-        addi s1, s1, 1
-        j 1b
-    2:
-
-    addi sp, sp, 48
-    add sp, sp, t6
-
-ret
-
-#void exit(int code)
-.globl exit
-exit:
-    li a7, 93
-    ecall
-ret
-
-#.globl _start
-#_start:
-#la a0, teste
-#jal gets
-#jal puts
+jal main
